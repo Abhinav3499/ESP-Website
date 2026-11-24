@@ -32,6 +32,7 @@ Learning Unlimited, Inc.
   Email: web-team@learningu.org
 """
 
+import pickle
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
@@ -39,7 +40,8 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 
-from esp.dbmail.models import ActionHandler, MessageRequest, PlainRedirect, send_mail
+from esp.dbmail.models import ActionHandler, MessageRequest, MessageVars, PlainRedirect, send_mail
+from esp.middleware import ESPError
 from esp.tests.util import CacheFlushTestCase as TestCase
 from esp.users.models import ESPUser, PersistentQueryFilter
 
@@ -102,6 +104,34 @@ class ActionHandlerTest(TestCase):
         handler = ActionHandler(FakeObj(), 'testuser')
         result = handler.foo('testuser')
         self.assertEqual(result, 'result_testuser')
+
+
+class _SampleMessageVarProvider:
+    def get_msg_vars(self, user, key):
+        return f'{key}_{user}'
+
+
+class MessageVarsTest(TestCase):
+    def test_get_dict_invalid_pickle_raises_esperror(self):
+        mv = MessageVars(pickled_provider=b'invalid_pickle_data', provider_name='test')
+        with self.assertRaises(ESPError) as cm:
+            mv.getDict('testuser')
+        self.assertEqual(str(cm.exception), 'Could not load variable provider object!')
+
+    def test_get_var_invalid_pickle_raises_esperror(self):
+        mv = MessageVars(pickled_provider=b'invalid_pickle_data', provider_name='test')
+        with self.assertRaises(ESPError) as cm:
+            mv.getVar('some_key', 'testuser')
+        self.assertEqual(str(cm.exception), 'Could not load variable provider object!')
+
+    def test_get_dict_and_get_var_valid_pickle(self):
+        mv = MessageVars(
+            pickled_provider=pickle.dumps(_SampleMessageVarProvider()),
+            provider_name='my_provider'
+        )
+        d = mv.getDict('testuser')
+        self.assertIn('my_provider', d)
+        self.assertEqual(mv.getVar('param', 'testuser'), 'param_testuser')
 
 
 class MessageRequestTest(TestCase):
